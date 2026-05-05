@@ -1,0 +1,19 @@
+# Clés et secrets
+serviceAccountKey.json
+firebase-key.json
+.env
+
+# Fichiers Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Modèles YOLO (volumineux)
+yolov8n.pt
+
+# Images uploadées
+reports_images/
+
+# IDE
+.vscode/
+.idea/

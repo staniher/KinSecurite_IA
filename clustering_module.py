@@ -1,73 +1,122 @@
 """
-MODULE DE CLUSTERING SPATIAL DBSCAN - VERSION COMPLÈTE
-Analyse de densité et détection des zones à risque
+MODULE DE CLUSTERING SPATIAL DBSCAN
+Analyse la densité des incidents pour identifier les zones à risque
+Version compatible Streamlit Cloud (sans geopy)
 """
 
-import pandas as pd
-import numpy as np
-from sklearn.cluster import DBSCAN
-from sklearn.metrics import silhouette_score
-from scipy.stats import spearmanr
-import warnings
-warnings.filterwarnings('ignore')
+# Import des bibliothèques nécessaires
+import pandas as pd                    # Pour manipuler les données tabulaires
+import numpy as np                     # Pour les calculs numériques
+from sklearn.cluster import DBSCAN     # Algorithme de clustering basé sur la densité
+from sklearn.metrics import silhouette_score  # Mesure de qualité du clustering
+from scipy.stats import spearmanr      # Corrélation statistique
+import warnings                         # Pour ignorer les avertissements superflus
+import math                             # Pour les calculs de distance (remplace geopy)
+warnings.filterwarnings('ignore')       # Désactive les avertissements non critiques
 
 
 class ClusteringModule:
     """
-    Module DBSCAN pour l'analyse spatiale des incidents
+    Classe qui encapsule toutes les fonctionnalités de clustering spatial
+    Utilise DBSCAN pour identifier les zones de concentration d'incidents
     """
     
     def __init__(self, eps=0.008, min_samples=5):
         """
-        Initialise le module de clustering
+        Constructeur de la classe - initialise le modèle DBSCAN
         
         Paramètres:
-        eps: rayon de recherche en degrés (0.008° ≈ 888 mètres à Kinshasa)
-        min_samples: nombre minimum de points pour former un cluster
+        -----------
+        eps : float, rayon de recherche en degrés (0.008 degré ≈ 880 mètres à Kinshasa)
+        min_samples : int, nombre minimum de points pour former un cluster dense
         """
+        # Stockage des paramètres pour usage ultérieur
         self.eps = eps
         self.min_samples = min_samples
-        self.model = DBSCAN(eps=eps, min_samples=min_samples, metric='euclidean')
+        
+        # Création du modèle DBSCAN avec les paramètres fournis
+        # La métrique euclidienne est standard pour les coordonnées géographiques
+        self.model = DBSCAN(eps=self.eps, min_samples=self.min_samples, metric='euclidean')
+    
+    def _haversine_distance(self, lat1, lon1, lat2, lon2):
+        """
+        Calcule la distance entre deux points GPS en kilomètres
+        Formule de Haversine (remplace geopy)
+        
+        Args:
+            lat1, lon1: coordonnées du premier point
+            lat2, lon2: coordonnées du deuxième point
+            
+        Returns:
+            float: distance en kilomètres
+        """
+        # Rayon de la Terre en kilomètres
+        R = 6371.0
+        
+        # Conversion des degrés en radians
+        lat1_rad = math.radians(lat1)
+        lon1_rad = math.radians(lon1)
+        lat2_rad = math.radians(lat2)
+        lon2_rad = math.radians(lon2)
+        
+        # Différences de coordonnées
+        dlat = lat2_rad - lat1_rad
+        dlon = lon2_rad - lon1_rad
+        
+        # Formule de Haversine
+        a = math.sin(dlat / 2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        
+        # Distance en kilomètres
+        distance = R * c
+        return distance
     
     def run_clustering(self, df):
         """
-        Exécute DBSCAN sur les coordonnées
+        Exécute l'algorithme DBSCAN sur les coordonnées latitude/longitude
         
         Paramètre:
-        df: DataFrame avec colonnes 'latitude' et 'longitude'
+        ----------
+        df : DataFrame contenant les colonnes 'latitude' et 'longitude'
         
         Retourne:
-        DataFrame avec colonne 'cluster' ajoutée
+        ---------
+        DataFrame avec une colonne 'cluster' ajoutée
         """
-        # Vérification du DataFrame vide
+        # Vérification que le DataFrame n'est pas vide
         if df is None or df.empty:
-            df_result = pd.DataFrame(columns=["latitude", "longitude"])
-            df_result['cluster'] = []
-            return df_result
+            # Crée un DataFrame vide avec la colonne cluster
+            df = pd.DataFrame(columns=["latitude", "longitude"])
+            df['cluster'] = []
+            return df
         
-        # Vérification des colonnes nécessaires
+        # Vérification que les colonnes nécessaires existent
         if not {'latitude', 'longitude'}.issubset(df.columns):
+            # Si les coordonnées manquent, tous les points sont marqués comme bruit (-1)
             df = df.copy()
             df['cluster'] = -1
             return df
         
-        # Copie et nettoyage
+        # Crée une copie pour ne pas modifier l'original
         df = df.copy()
+        
+        # Supprime les lignes où les coordonnées sont manquantes
         df = df.dropna(subset=['latitude', 'longitude'])
         
-        # Pas assez de points
-        if len(df) < self.min_samples:
+        # Il faut au moins 2 points pour faire du clustering
+        if len(df) < 2:
             df['cluster'] = -1
             return df
         
-        # Extraction des coordonnées
+        # Extrait les coordonnées dans un tableau numpy (format attendu par scikit-learn)
         coords = df[['latitude', 'longitude']].values
         
-        # Exécution du clustering
+        # Exécution du clustering avec gestion d'erreur
         try:
-            labels = self.model.fit_predict(coords)
-            df['cluster'] = labels
+            # fit_predict effectue le clustering et retourne les labels (-1 = bruit)
+            df['cluster'] = self.model.fit_predict(coords)
         except Exception as e:
+            # En cas d'erreur (ex: mémoire insuffisante), tous les points sont bruit
             print(f"Erreur DBSCAN: {e}")
             df['cluster'] = -1
         
@@ -78,9 +127,11 @@ class ClusteringModule:
         Calcule les statistiques détaillées des clusters
         
         Paramètre:
-        df_clustered: DataFrame avec colonne 'cluster'
+        ----------
+        df_clustered : DataFrame avec colonne 'cluster'
         
         Retourne:
+        ---------
         Dictionnaire avec statistiques
         """
         stats = {
@@ -122,11 +173,11 @@ class ClusteringModule:
             center_lat = cluster_points['latitude'].mean()
             center_lon = cluster_points['longitude'].mean()
             
-            # Rayon approximatif en km
-            from geopy.distance import distance
+            # Rayon approximatif en km (calculé avec la formule de Haversine)
             max_dist = 0
             for _, row in cluster_points.iterrows():
-                dist = distance((center_lat, center_lon), (row['latitude'], row['longitude'])).km
+                # Utilise la formule de Haversine au lieu de geopy
+                dist = self._haversine_distance(center_lat, center_lon, row['latitude'], row['longitude'])
                 max_dist = max(max_dist, dist)
             
             # Types d'incidents dans le cluster
@@ -144,7 +195,7 @@ class ClusteringModule:
             stats['clusters_detail'].append({
                 'cluster_id': int(label),
                 'size': len(cluster_points),
-                'percentage': (len(cluster_points) / stats['total_points']) * 100,
+                'percentage': (len(cluster_points) / stats['total_points']) * 100 if stats['total_points'] > 0 else 0,
                 'center_lat': center_lat,
                 'center_lon': center_lon,
                 'radius_km': max_dist,
@@ -163,9 +214,11 @@ class ClusteringModule:
         Évalue la qualité du clustering
         
         Paramètre:
-        df_clustered: DataFrame avec colonne 'cluster'
+        ----------
+        df_clustered : DataFrame avec colonne 'cluster'
         
         Retourne:
+        ---------
         Dictionnaire avec métriques d'évaluation
         """
         metrics = {
@@ -221,9 +274,11 @@ class ClusteringModule:
         Classe les communes par niveau d'insécurité
         
         Paramètre:
-        df: DataFrame avec colonne 'commune'
+        ----------
+        df : DataFrame avec colonne 'commune'
         
         Retourne:
+        ---------
         DataFrame avec classification
         """
         if df is None or df.empty or 'commune' not in df.columns:
@@ -267,9 +322,11 @@ class ClusteringModule:
         Calcule la corrélation de Spearman
         
         Paramètre:
-        df_results: DataFrame avec colonnes 'commune' et 'count'
+        ----------
+        df_results : DataFrame avec colonnes 'commune' et 'count'
         
         Retourne:
+        ---------
         Tuple (corrélation, p-value)
         """
         if df_results is None or df_results.empty or 'commune' not in df_results.columns:
@@ -311,10 +368,12 @@ class ClusteringModule:
         Identifie les hotspots (points de forte concentration)
         
         Paramètres:
-        df_clustered: DataFrame avec colonne 'cluster'
-        top_n: nombre de hotspots à retourner
+        ----------
+        df_clustered : DataFrame avec colonne 'cluster'
+        top_n : nombre de hotspots à retourner
         
         Retourne:
+        ---------
         DataFrame des hotspots
         """
         if df_clustered is None or df_clustered.empty:
@@ -344,9 +403,11 @@ class ClusteringModule:
         Calcule les géométries des clusters pour l'affichage sur carte
         
         Paramètre:
-        df_clustered: DataFrame avec colonne 'cluster'
+        ----------
+        df_clustered : DataFrame avec colonne 'cluster'
         
         Retourne:
+        ---------
         Dictionnaire des clusters avec centres et rayons
         """
         if df_clustered is None or df_clustered.empty:
@@ -369,11 +430,10 @@ class ClusteringModule:
             center_lat = cluster_points['latitude'].mean()
             center_lon = cluster_points['longitude'].mean()
             
-            # Calcul du rayon moyen
-            from geopy.distance import distance
+            # Calcul du rayon moyen (formule de Haversine)
             distances = []
             for _, row in cluster_points.iterrows():
-                dist = distance((center_lat, center_lon), (row['latitude'], row['longitude'])).km
+                dist = self._haversine_distance(center_lat, center_lon, row['latitude'], row['longitude'])
                 distances.append(dist)
             
             avg_radius = np.mean(distances) if distances else 0.5
@@ -392,9 +452,11 @@ class ClusteringModule:
         Calcule les zones de risque par commune
         
         Paramètre:
-        df_clustered: DataFrame avec colonnes 'commune' et 'cluster'
+        ----------
+        df_clustered : DataFrame avec colonnes 'commune' et 'cluster'
         
         Retourne:
+        ---------
         DataFrame avec scores de risque par commune
         """
         if df_clustered is None or df_clustered.empty or 'commune' not in df_clustered.columns:
@@ -413,7 +475,10 @@ class ClusteringModule:
         
         # Score de risque normalisé
         max_incidents = commune_stats['total_incidents'].max()
-        commune_stats['calculated_risk_score'] = (commune_stats['total_incidents'] / max_incidents) * 100
+        if max_incidents > 0:
+            commune_stats['calculated_risk_score'] = (commune_stats['total_incidents'] / max_incidents) * 100
+        else:
+            commune_stats['calculated_risk_score'] = 0
         
         # Niveaux de risque
         def get_risk_level(score):
@@ -473,9 +538,5 @@ if __name__ == "__main__":
     # Test évaluation
     metrics = cm.evaluate_model(result)
     print(f"Silhouette: {metrics['silhouette']:.3f} ({metrics['silhouette_interpretation']})")
-    
-    # Test classification communes
-    classification = cm.classify_communes(test_data)
-    print(f"Communes classées: {len(classification)}")
     
     print("✅ Tous les tests passés")

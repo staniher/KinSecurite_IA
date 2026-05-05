@@ -1,22 +1,26 @@
 """
 MODULE VISION PAR ORDINATEUR - VERSION COMPLÈTE
 Détection d'objets avec YOLOv8 + upload d'images
+Version compatible Streamlit Cloud (sans OpenCV)
 """
 
+# Import des bibliothèques
 import streamlit as st
 import numpy as np
 from datetime import datetime
 import random
-import cv2
 import os
 from PIL import Image, ImageOps
 import tempfile
+import requests
+from io import BytesIO
 
 
 class VisionModule:
     """
     Module de vision par ordinateur avec YOLOv8
     Permet l'upload d'images et la détection d'objets
+    Version compatible sans OpenCV (utilise PIL)
     """
     
     def __init__(self, use_real_detection=True):
@@ -26,8 +30,11 @@ class VisionModule:
         Args:
             use_real_detection: True pour utiliser YOLO, False pour simulation
         """
+        # Modèle YOLO (sera chargé plus tard)
         self.model = None
+        # Indique si YOLO est disponible
         self.yolo_available = False
+        # Mode d'opération (réel ou simulation)
         self.use_real_detection = use_real_detection
         
         # Tentative de chargement de YOLO
@@ -35,7 +42,7 @@ class VisionModule:
             self._load_yolo_model()
         
         # Classes d'objets pertinentes pour la sécurité
-        self.safety_classes = {
+        self.relevant_classes = {
             'person': 'Personne',
             'car': 'Véhicule',
             'truck': 'Camion',
@@ -45,13 +52,12 @@ class VisionModule:
             'scissors': 'Ciseaux',
             'gun': 'Arme à feu',
             'fire': 'Feu/Incendie',
-            'smoke': 'Fumée',
-            'crowd': 'Foule'
+            'smoke': 'Fumée'
         }
     
     def _load_yolo_model(self):
         """
-        Charge le modèle YOLOv8
+        Charge le modèle YOLOv8 sans dépendre d'OpenCV
         """
         try:
             from ultralytics import YOLO
@@ -59,14 +65,15 @@ class VisionModule:
             # Téléchargement automatique si absent
             model_path = 'yolov8n.pt'
             
-            with st.spinner("📥 Téléchargement du modèle YOLOv8 (premier lancement uniquement)..."):
+            # Afficher une barre de progression (fonctionne sur Streamlit)
+            with st.spinner("📥 Chargement du modèle YOLOv8 (premier lancement peut prendre du temps)..."):
                 self.model = YOLO(model_path)
             
             self.yolo_available = True
             print("✅ YOLOv8 chargé avec succès")
             
-            # Test rapide
-            test_img = np.zeros((640, 640, 3), dtype=np.uint8)
+            # Test rapide avec une image factice (sans OpenCV)
+            test_img = np.zeros((320, 320, 3), dtype=np.uint8)
             _ = self.model(test_img, verbose=False)
             print("✅ Test YOLO réussi")
             
@@ -77,59 +84,9 @@ class VisionModule:
             st.warning(f"⚠️ Erreur YOLO: {e}")
             self.yolo_available = False
     
-    def display_upload_section(self):
-        """
-        Affiche la section d'upload d'images dans l'interface
-        """
-        st.markdown("### 📸 Analyse d'image par intelligence artificielle")
-        st.markdown("Téléchargez une photo prise sur le terrain pour une analyse automatique")
-        
-        # Widget d'upload
-        uploaded_file = st.file_uploader(
-            "Choisir une image (JPEG, PNG)",
-            type=['jpg', 'jpeg', 'png'],
-            help="L'IA analysera l'image pour détecter des objets suspects",
-            key="vision_upload"
-        )
-        
-        if uploaded_file is not None:
-            # Afficher l'image
-            image = Image.open(uploaded_file)
-            st.image(image, caption="Image à analyser", width=400)
-            
-            # Bouton d'analyse
-            if st.button("🔍 ANALYSER L'IMAGE AVEC YOLO", type="primary", key="analyze_btn"):
-                return self._analyze_uploaded_file(uploaded_file)
-        
-        return None
-    
-    def _analyze_uploaded_file(self, uploaded_file):
-        """
-        Analyse un fichier uploadé avec YOLO
-        """
-        # Sauvegarde temporaire
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
-            tmp_file.write(uploaded_file.getvalue())
-            tmp_path = tmp_file.name
-        
-        # Analyse avec YOLO
-        with st.spinner("🔍 Analyse en cours avec YOLOv8..."):
-            detections = self.detect_from_image(tmp_path)
-            gps_data = self._extract_gps_from_file(tmp_path)
-        
-        # Nettoyage
-        os.unlink(tmp_path)
-        
-        return {
-            'detections': detections,
-            'gps_data': gps_data,
-            'has_detections': len(detections) > 0,
-            'image_name': uploaded_file.name
-        }
-    
     def detect_from_image(self, image_source):
         """
-        Détecte des objets dans une image
+        Détecte des objets dans une image (sans OpenCV)
         
         Args:
             image_source: chemin d'image, URL, ou array numpy
@@ -142,24 +99,27 @@ class VisionModule:
             return self._simulate_detection()
         
         try:
-            # Chargement de l'image
+            # Chargement de l'image (uniquement avec PIL, pas OpenCV)
             if isinstance(image_source, str):
                 if image_source.startswith('http'):
-                    import requests
-                    from io import BytesIO
+                    # Téléchargement depuis URL
                     response = requests.get(image_source)
                     image = Image.open(BytesIO(response.content))
-                    image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
                 else:
-                    image = cv2.imread(image_source)
+                    # Chargement depuis fichier
+                    image = Image.open(image_source)
             else:
+                # Si c'est déjà un objet PIL Image
                 image = image_source
             
             if image is None:
                 return self._simulate_detection()
             
+            # Convertir PIL Image en numpy array (format attendu par YOLO)
+            image_np = np.array(image)
+            
             # Détection YOLO
-            results = self.model(image, verbose=False)
+            results = self.model(image_np, verbose=False)
             
             # Traitement des résultats
             detections = []
@@ -174,9 +134,10 @@ class VisionModule:
                     confidence = float(box.conf[0])
                     
                     # Filtrer les classes pertinentes
-                    if confidence > 0.5:  # Seuil de confiance
+                    if confidence > 0.5 and label in self.relevant_classes:
                         detection = {
-                            "label": label,
+                            "label": self.relevant_classes[label],
+                            "original_label": label,
                             "confidence": confidence,
                             "confidence_pct": f"{confidence*100:.0f}%",
                             "timestamp": datetime.now().isoformat()
@@ -207,6 +168,35 @@ class VisionModule:
         except Exception as e:
             print(f"Erreur détection: {e}")
             return self._simulate_detection()
+    
+    def analyze_uploaded_file(self, uploaded_file):
+        """
+        Analyse un fichier uploadé via Streamlit
+        
+        Args:
+            uploaded_file: objet UploadedFile de Streamlit
+            
+        Returns:
+            tuple: (detections, gps_data)
+        """
+        # Sauvegarde temporaire
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            tmp_path = tmp_file.name
+        
+        # Analyse avec YOLO
+        detections = self.detect_from_image(tmp_path)
+        
+        # Extraction des métadonnées GPS (optionnelle)
+        gps_data = self._extract_gps_from_file(tmp_path)
+        
+        # Nettoyage
+        try:
+            os.unlink(tmp_path)
+        except:
+            pass
+        
+        return detections, gps_data
     
     def _extract_gps_from_file(self, filepath):
         """
@@ -297,52 +287,10 @@ class VisionModule:
             "is_simulation": not self.yolo_available
         }]
     
-    def display_detection_results(self, analysis_result):
-        """
-        Affiche les résultats de l'analyse dans l'interface
-        """
-        if analysis_result is None:
-            return None
-        
-        detections = analysis_result['detections']
-        
-        st.markdown("---")
-        st.markdown("### 🔍 RÉSULTATS DE L'ANALYSE")
-        
-        if analysis_result['has_detections']:
-            # Alertes critiques
-            alerts = [d for d in detections if d.get('alert', False)]
-            if alerts:
-                for alert in alerts:
-                    st.error(f"🚨 **ALERTE {alert['severity']}** : {alert['label']} (confiance: {alert['confidence_pct']})")
-            
-            # Liste des détections
-            st.markdown("**📋 Objets détectés:**")
-            for d in detections:
-                if not d.get('alert', False):
-                    st.write(f"- {d['label']}: {d['confidence_pct']}")
-            
-            # Métadonnées GPS
-            if analysis_result['gps_data'] and analysis_result['gps_data'].get('has_gps'):
-                gps = analysis_result['gps_data']
-                st.success(f"📍 **Géolocalisation détectée:** {gps['latitude']:.5f}, {gps['longitude']:.5f}")
-            
-            # Mode simulation
-            if detections and detections[0].get('is_simulation'):
-                st.info("ℹ️ Mode simulation actif (YOLO non disponible). Installez ultralytics pour la détection réelle.")
-            
-            # Bouton pour créer un incident
-            if st.button("➕ CRÉER UN INCIDENT À PARTIR DE CETTE ANALYSE", key="create_from_vision"):
-                return detections
-        else:
-            st.info("Aucun objet pertinent détecté dans cette image")
-        
-        return None
-    
     def generate_incident_from_detection(self, detection, commune_info):
         """
         Génère un incident à partir d'une détection
-        VERSION CORRIGÉE POUR FIREBASE
+        Version CORRIGÉE pour Firebase
         """
         from datetime import datetime
         
@@ -354,24 +302,18 @@ class VisionModule:
         detection_label = detection.get('label', 'Inconnu').lower()
         
         # Mapping détection -> type d'incident
-        if 'attroupement' in detection_label or 'foule' in detection_label:
+        if 'attroupement' in detection_label:
             incident_type = "Attroupement suspect"
             gravite = "Moyenne"
-        elif 'arme' in detection_label or 'couteau' in detection_label or 'gun' in detection_label:
+        elif 'arme' in detection_label or 'couteau' in detection_label:
             incident_type = "Port d'arme"
-            gravite = "Critique"
-        elif 'incendie' in detection_label or 'feu' in detection_label or 'fumée' in detection_label:
-            incident_type = "Incendie"
             gravite = "Critique"
         elif 'bagarre' in detection_label or 'altercation' in detection_label:
             incident_type = "Violence"
             gravite = "Élevée"
-        elif 'personne' in detection_label:
-            incident_type = "Personne suspecte"
-            gravite = "Faible"
-        elif 'véhicule' in detection_label or 'voiture' in detection_label:
-            incident_type = "Véhicule suspect"
-            gravite = "Moyenne"
+        elif 'incendie' in detection_label or 'feu' in detection_label:
+            incident_type = "Incendie"
+            gravite = "Critique"
         else:
             incident_type = detection.get('label', 'Incident signalé')
             gravite_severity = detection.get('severity', 'Moyenne')

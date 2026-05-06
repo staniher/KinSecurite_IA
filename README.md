@@ -187,3 +187,26 @@ YOLOv8 (Ultralytics)	  vision_module	           Détection d'objets
 Firebase Admin	        firebase_manager	        Cloud Firestore
 OpenCV	              vision_module	           Traitement d'images
 PIL/Pillow	           vision_module	           Manipulation d'images
+
+```
+Déployer sur Streamlit Cloud
+    Créer d'abord un dépôt GitHub et y deposer votre projet 
+    Allez sur https://share.streamlit.io
+    Connectez-vous avec votre compte GitHub
+    Cliquez sur "New app"
+    Sélectionnez votre dépôt kinsecurite-ia
+    Choisissez la branche main
+    Fichier principal: app.py
+    Cliquez sur "Deploy"
+```
+```
+Configurer les secrets Firebase (important !)
+    Dans Streamlit Cloud, vous devez ajouter votre clé Firebase en tant que secret :
+        Allez dans votre application déployée
+        Cliquez sur les "..." (trois points) → "Settings"
+        Allez dans la section "Secrets"
+        Ajoutez ce secret :
+             FIREBASE_CREDENTIALS = '{"type":"....."}'
+```
+https://kinsecuriteia-behe52t2ddvai2dmzrtx26.streamlit.app/
+https://share.streamlit.io/
